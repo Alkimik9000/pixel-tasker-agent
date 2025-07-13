@@ -1,0 +1,159 @@
+# Tech Context for Pixel Tasker Agent
+
+This file complements `.cursor` rules and informs tooling/navigation by outlining relevant libraries, APIs, and setup context.
+
+---
+
+## 🧩 Core Agent Framework – Google ADK
+
+- **Agent Development Kit (ADK)**: Lightweight, modular framework for constructing Python/Java agents using workflows such as `Sequential`, `Parallel`, or LLM-driven control (`LlmAgent`). Install via `pip install google‑adk` and extend `BaseAgent` to define domain‑specific workflows.
+- ADK supports defining tools and orchestrating multi-agent systems—ideal foundation for planning/execution phases in Pixel Tasker Agent.
+- Utilize Vertex AI template `AdkApp` for quick scaffolding of agents with session management and tool integration.
+
+**Key Classes & Patterns:**
+- `BaseAgent` - Core agent abstraction
+- `Sequential`, `Parallel` - Workflow orchestration
+- `LlmAgent` - LLM-driven control flow
+- Tool registration and multi-agent coordination
+
+---
+
+## 🔍 Vision + NL Processing – Gemini API
+
+- **google‑genai Python SDK** provides access to multimodal Gemini models (e.g. `gemini‑2.5‑flash`) capable of image analysis and structured responses via function calling.
+- Supports "thinking mode" for chain-of-thought planning, improving UI-focused reasoning.
+- Manage API keys securely using environment variables (`GEMINI_API_KEY`) or explicit injection as per best practices in Python-dotenv.
+
+**Key Usage Patterns:**
+- Multimodal input (text + images) for UI analysis
+- Structured output via function calling
+- Chain-of-thought reasoning for complex UI tasks
+- Vision-based element detection and interaction planning
+
+---
+
+## 📱 Device Control & UI Automation
+
+- **uiautomator2**: Python wrapper for UI automation on Android. Enables screen capture, element detection, clicks, and text input—key for interacting with Tasker UI.
+- **adb-shell**: Python library to run adb commands within code—simplifies taps, intent triggers, and shell commands without direct ADB CLI usage.
+- **Android Debug Bridge (ADB)**: Standard tool for device control—covering injections of taps, screen captures, app launches, and broadcast intent triggers. Essential for Tasker task testing.
+
+**Common Operations:**
+- Screen capture and element detection
+- UI element interaction (tap, swipe, input)
+- App navigation and control
+- Intent broadcasting for Tasker integration
+
+---
+
+## 💻 Screen Mirroring & Image Handling
+
+- **scrcpy**: High-performance tool for mirroring the Pixel 8 Pro screen over USB/ADB with customizable flags (e.g., `--serial`) on Linux.
+- **Pillow (PIL)**: Python library for loading/saving/manipulating screenshots before passing to Gemini vision analysis.
+
+**Workflow Integration:**
+- Real-time screen mirroring for visual feedback
+- Image preprocessing for AI analysis
+- Screenshot capture and coordinate mapping
+- Visual debugging and interaction verification
+
+---
+
+## 📐 Pixel 8 Pro UI Layout
+
+- Pixel 8 Pro (Android 14+) has specific screen resolution and density. Use Android's resolution guides to compute coordinate mapping for UI element taps.
+
+**Device Specifications:**
+- Screen resolution: 1008 x 2244 pixels
+- Density: 489 DPI
+- Android 14+ specific UI patterns
+- Coordinate system for precise element targeting
+
+---
+
+## 📋 Tasker Automation
+
+- **Tasker User Guide & Intents**: Defines structure of Profiles, Tasks, Actions. Supports `Send Intent` to programmatically trigger tasks—crucial for verifying automation.
+
+**Integration Points:**
+- Profile and Task structure understanding
+- Intent-based task triggering
+- Action sequence automation
+- Automated testing and validation
+
+---
+
+## 🔐 Config Management
+
+- **python‑dotenv**: Load `.env` files to manage Gemini API keys and configuration securely without hardcoding.
+
+**Security Best Practices:**
+- Environment-based configuration
+- Secure API key management
+- Separation of dev/prod configurations
+- Version control exclusion patterns
+
+---
+
+## ✅ Summary Table
+
+| Component            | Role                                                      | Key Libraries/Tools |
+|---------------------|-----------------------------------------------------------|-------------------|
+| ADK                 | Agent scaffolding, planning flows                         | `google-adk`, `BaseAgent` |
+| Gemini API + SDK    | Screen capture analysis, NL->UI reasoning                 | `google-generativeai` |
+| uiautomator2 / adb-shell | Device UI navigation, interaction                  | `uiautomator2`, `adb-shell` |
+| scrcpy + Pillow     | Visual mirroring & image preprocessing                    | `scrcpy`, `Pillow` |
+| Tasker + ADB Intents| Automation setup and validation via broadcast intents     | ADB, Tasker APIs |
+| python-dotenv       | Secure configuration management                           | `python-dotenv` |
+
+---
+
+## 📚 Reference Sources
+
+1. **Google Agent Development Kit (ADK) Documentation**: Official guide for building AI agents with Python/Java, including setup, agents, tools, and workflows. Useful for the core agent structure.
+   - Link: https://google.github.io/agent-development-kit/
+
+2. **Gemini API Python SDK Documentation**: Details on using the google-generativeai library for multimodal models like gemini-2.5-flash, including image analysis and content generation.
+   - Link: https://ai.google.dev/gemini-api/docs/get-started/python
+
+3. **uiautomator2 GitHub Repository**: Python wrapper for Android UI automation, covering device connection, screenshots, and element interaction—key for screen capture and navigation.
+   - Link: https://github.com/openatx/uiautomator2
+
+4. **Android Debug Bridge (ADB) Reference**: Comprehensive commands for device control, including input taps, shell execution, and intents—essential for clicks and testing.
+   - Link: https://developer.android.com/tools/adb
+
+5. **scrcpy GitHub Repository**: Tool for mirroring and controlling Android devices over USB/ADB, with setup for Linux and usage flags like --serial.
+   - Link: https://github.com/Genymobile/scrcpy
+
+6. **Tasker User Guide and Intents Documentation**: Explains Tasker app structure, actions/profiles, and broadcast intents for running tasks programmatically.
+   - Link: https://tasker.joaoapps.com/userguide.html
+
+7. **adb-shell Python Library Documentation**: For executing ADB commands in Python, useful for taps and shell interactions without direct ADB calls.
+   - Link: https://pypi.org/project/adb-shell/
+
+8. **Python-dotenv Documentation**: Guide for loading .env files, crucial for secure API key and config management.
+   - Link: https://pypi.org/project/python-dotenv/
+
+9. **Pillow (PIL) Documentation**: For image handling in Python, used for opening/processing screenshots before Gemini analysis.
+   - Link: https://pillow.readthedocs.io/en/stable/
+
+10. **Android Device Resolution and Coordinates Guide**: Explains handling screen resolutions for automation, relevant for Pixel 8 Pro specifics.
+    - Link: https://developer.android.com/training/basics/supporting-devices/screens
+
+---
+
+## 🚀 Development Workflow Context
+
+This project follows a vision-first approach where:
+1. **Screen capture** → **Gemini analysis** → **Action planning** → **Device execution**
+2. Agent orchestration via ADK for complex multi-step automation
+3. Secure configuration management for API keys and device settings
+4. Real-time feedback loop through screen mirroring and visual validation
+
+**Code Style Guidelines:**
+- Python functions use camelCase naming convention
+- Full type annotations required
+- No f-strings (use string concatenation or .format())
+- snake_case for variables
+- Modular design with separate class files
+- Utility functions in utils.py

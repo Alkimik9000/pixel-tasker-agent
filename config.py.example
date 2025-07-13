@@ -1,0 +1,27 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Google API Configuration
+# Get your API key from: https://makersuite.google.com/app/apikey
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# Device Configuration
+# Find your device serial with: adb devices
+DEVICE_SERIAL = os.getenv("DEVICE_SERIAL")
+
+# Device dimensions (default for Pixel 8 Pro)
+DEVICE_WIDTH = int(os.getenv("DEVICE_WIDTH", 1344))
+DEVICE_HEIGHT = int(os.getenv("DEVICE_HEIGHT", 2992))
+
+# Tasker Configuration
+TASKER_PACKAGE_NAME = os.getenv("TASKER_PACKAGE_NAME", "net.dinglisch.android.taskerm")
+
+# Validation
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable is required")
+
+if not DEVICE_SERIAL:
+    raise ValueError("DEVICE_SERIAL environment variable is required") 
