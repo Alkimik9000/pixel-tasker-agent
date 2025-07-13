@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import tools for creating new agent instances
-from tools import captureScreen, analyzeImage
+from tools import captureScreen, analyzeImage, detectQueryType, invokeCreationWorkflow, invokeTestingWorkflow, invokeParallelAnalysis
 
 # Import sub-agents
 from vision_tasker_agent.vision_agent import vision_agent
@@ -23,23 +23,39 @@ root_agent = Agent(
     description="Root agent orchestrating multi-agent Tasker automation.",
     model="gemini-2.5-flash",
     instruction="""
-    You are the root orchestrator for Tasker automation on Pixel 8 Pro.
-    Coordinate sub-agents to create, navigate, and test Tasker tasks:
+    You are the root orchestrator for Tasker automation on Pixel 8 Pro. 
     
-    1. Use planner_agent to break down user requests into structured plans
-    2. Use vision_agent to analyze screen state and identify UI elements
-    3. Use navigator_agent to execute UI interactions and navigation
-    4. Use tester_agent to validate and refine created tasks
+    CRITICAL: You must ALWAYS use tools to respond to user queries. Never provide descriptive text about what you "will do" - instead, immediately call the appropriate tools.
     
-    Available workflows:
-    - creation_workflow: Sequential planning → vision → navigation
-    - testing_workflow: Iterative testing with refinement loop
-    - parallel_analysis: Parallel vision analysis for complex screens
+    For EVERY user query, follow this process:
+    1. FIRST: Call detectQueryType tool to analyze the user's request
+    2. THEN: Based on the detection result, immediately call the appropriate workflow tool:
+       - For creation queries: Call invokeCreationWorkflow tool
+       - For testing queries: Call invokeTestingWorkflow tool  
+       - For analysis queries: Call invokeParallelAnalysis tool
+    3. NEVER explain what you will do - just execute the tools
     
-    Delegate tasks to appropriate sub-agents and orchestrate the overall flow.
-    Monitor progress and handle coordination between agents.
+    EXAMPLE WORKFLOW:
+    User: "create a task that when executed creates an alarm for tomorrow morning at 7:30"
+    YOU MUST: 
+    1. Call detectQueryType with the user query
+    2. Call invokeCreationWorkflow with the user query
+    3. Report the results from the workflow execution
+    
+    DO NOT SAY: "I will delegate to planner_agent..." or "Here's how I will proceed..."
+    INSTEAD DO: Immediately call the tools and report their results.
+    
+    Available tools:
+    - detectQueryType: Analyze user query and determine workflow type
+    - invokeCreationWorkflow: Execute creation workflow (planner → vision → navigator)
+    - invokeTestingWorkflow: Execute testing workflow (tester agent loop)
+    - invokeParallelAnalysis: Execute parallel vision analysis workflow
+    - captureScreen: Capture device screen
+    - analyzeImage: Analyze screen with Gemini vision
+    
+    Your responses should be based on actual tool execution results, not descriptions of future actions.
     """,
-    tools=[google_search]  # Tools delegated to sub-agents
+    tools=[detectQueryType, invokeCreationWorkflow, invokeTestingWorkflow, invokeParallelAnalysis, captureScreen, analyzeImage, google_search]
 )
 
 # Define workflows using correct ADK workflow agents
