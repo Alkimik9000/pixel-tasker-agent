@@ -2,280 +2,291 @@ import uiautomator2 as u2
 from adb_shell.adb_device import AdbDeviceUsb
 import google.generativeai as genai
 from google.generativeai.generative_models import GenerativeModel
+from google.adk.tools import FunctionTool
 from PIL import Image
 import json
 import time
-from typing import Dict, Any, Optional
+import logging
+from typing import Dict, Any, Optional, List
 from config import GOOGLE_API_KEY, DEVICE_SERIAL, DEVICE_WIDTH, DEVICE_HEIGHT
 
-# Load env
-genai.configure(api_key=GOOGLE_API_KEY)
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Connect to device
+# Configure Gemini
+# Note: genai.configure is not needed with GenerativeModel
+
+# Device connection function
 def getDevice() -> Any:
+    """Get connected Android device instance."""
     if DEVICE_SERIAL is None:
         raise ValueError("DEVICE_SERIAL environment variable is not set")
-    return u2.connect(DEVICE_SERIAL)
+    try:
+        device = u2.connect(DEVICE_SERIAL)
+        logger.info("Successfully connected to device: " + DEVICE_SERIAL)
+        return device
+    except Exception as e:
+        logger.error("Failed to connect to device: " + str(e))
+        raise
 
-# Capture Screen
+# Core tool functions with proper ADK structure
 def captureScreen() -> Dict[str, Any]:
-    d = getDevice()
-    img_path = "current_screen.png"
-    d.screenshot(img_path)
-    return {"image_path": img_path, "success": True}
+    """Capture a screenshot of the current device screen.
+    
+    This tool captures the current screen state of the Android device and saves it as an image file.
+    Use this tool when you need to analyze the current UI state before performing actions.
+    
+    Returns:
+        dict: Contains 'image_path' of the saved screenshot and 'success' status.
+    """
+    try:
+        logger.info("Capturing screen...")
+        d = getDevice()
+        img_path = "current_screen.png"
+        d.screenshot(img_path)
+        logger.info("Screen captured successfully: " + img_path)
+        return {"image_path": img_path, "success": True}
+    except Exception as e:
+        logger.error("Screen capture failed: " + str(e))
+        return {"success": False, "error": str(e)}
 
-# Analyze Image with Gemini
 def analyzeImage(image_path: str, query: Optional[str] = None) -> Dict[str, Any]:
+    """Analyze an Android screen image using Gemini vision to identify UI elements.
+    
+    This tool uses Gemini vision AI to analyze screenshots and identify clickable UI elements,
+    providing bounding boxes and coordinates for automation.
+    
+    Args:
+        image_path: Path to the image file to analyze
+        query: Optional specific query for the analysis (default: general UI element detection)
+    
+    Returns:
+        dict: Contains 'analysis' with detected elements including normalized and absolute coordinates.
+    """
     if query is None:
         query = "Describe this Android screen, detect buttons/text, provide bounding boxes normalized 0-1000 for elements like 'Add Task'. Output as JSON."
     
-    model = GenerativeModel("gemini-2.5-flash")
-    img = Image.open(image_path)
-    response = model.generate_content(
-        [query, img],
-        generation_config={"response_mime_type": "application/json"}
-    )
-    analysis = json.loads(response.text)
-    # Convert normalized boxes to absolute coords
-    for item in analysis.get("elements", []):
-        if "box_2d" in item:
-            box = item["box_2d"]  # [ymin, xmin, ymax, xmax] normalized 0-1000
-            item["abs_box"] = [
-                int(box[1] / 1000 * DEVICE_WIDTH),  # xmin
-                int(box[0] / 1000 * DEVICE_HEIGHT), # ymin
-                int(box[3] / 1000 * DEVICE_WIDTH),  # xmax
-                int(box[2] / 1000 * DEVICE_HEIGHT)  # ymax
-            ]
-            # Center for click
-            item["click_x"] = (item["abs_box"][0] + item["abs_box"][2]) // 2
-            item["click_y"] = (item["abs_box"][1] + item["abs_box"][3]) // 2
-    return {"analysis": analysis}
+    try:
+        logger.info("Analyzing image: " + image_path + " with query: " + query)
+        model = GenerativeModel("gemini-2.0-flash")
+        img = Image.open(image_path)
+        response = model.generate_content(
+            [query, img],
+            generation_config={"response_mime_type": "application/json"}
+        )
+        analysis = json.loads(response.text)
+        
+        # Convert normalized boxes to absolute coords
+        for item in analysis.get("elements", []):
+            if "box_2d" in item:
+                box = item["box_2d"]  # [ymin, xmin, ymax, xmax] normalized 0-1000
+                item["abs_box"] = [
+                    int(box[1] / 1000 * DEVICE_WIDTH),  # xmin
+                    int(box[0] / 1000 * DEVICE_HEIGHT), # ymin
+                    int(box[3] / 1000 * DEVICE_WIDTH),  # xmax
+                    int(box[2] / 1000 * DEVICE_HEIGHT)  # ymax
+                ]
+                # Center for click
+                item["click_x"] = (item["abs_box"][0] + item["abs_box"][2]) // 2
+                item["click_y"] = (item["abs_box"][1] + item["abs_box"][3]) // 2
+        
+        logger.info("Image analysis complete, found " + str(len(analysis.get("elements", []))) + " elements")
+        return {"analysis": analysis, "success": True}
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse Gemini response as JSON: " + str(e))
+        return {"success": False, "error": "Invalid JSON response", "raw_response": response.text}
+    except Exception as e:
+        logger.error("Image analysis failed: " + str(e))
+        return {"success": False, "error": str(e)}
 
-# Perform Click (by coords)
-def performClick(x: int, y: int) -> Dict[str, str]:
-    device = AdbDeviceUsb(serial=DEVICE_SERIAL)
-    device.connect()
-    device.shell("input tap " + str(x) + " " + str(y))
-    time.sleep(1)  # Delay for UI response
-    return {"status": "Clicked at (" + str(x) + ", " + str(y) + ")"}
+def performClick(x: int, y: int) -> Dict[str, Any]:
+    """Perform a click action at specified coordinates on the Android device.
+    
+    This tool executes a tap action at the given x,y coordinates using ADB.
+    Use this after analyzing the screen to click on specific UI elements.
+    
+    Args:
+        x: X coordinate for the click
+        y: Y coordinate for the click
+    
+    Returns:
+        dict: Contains status message and success indicator.
+    """
+    try:
+        logger.info("Performing click at (" + str(x) + ", " + str(y) + ")")
+        device = AdbDeviceUsb(serial=DEVICE_SERIAL)
+        device.connect()
+        device.shell("input tap " + str(x) + " " + str(y))
+        time.sleep(1)  # Delay for UI response
+        logger.info("Click executed successfully")
+        return {"status": "Clicked at (" + str(x) + ", " + str(y) + ")", "success": True}
+    except Exception as e:
+        logger.error("Click failed: " + str(e))
+        return {"status": "Click failed", "success": False, "error": str(e)}
 
-# Navigate Tasker Step (high-level, uses analysis/click)
+def performTextInput(text: str) -> Dict[str, Any]:
+    """Input text into the currently focused field on the Android device.
+    
+    This tool types the specified text into whatever field currently has focus.
+    Make sure to click on a text field first before using this tool.
+    
+    Args:
+        text: The text to input
+    
+    Returns:
+        dict: Contains status message and success indicator.
+    """
+    try:
+        logger.info("Inputting text: " + text)
+        device = AdbDeviceUsb(serial=DEVICE_SERIAL)
+        device.connect()
+        # Escape quotes and special characters for shell
+        escaped_text = text.replace('"', '\\"').replace("'", "\\'")
+        device.shell('input text "' + escaped_text + '"')
+        time.sleep(1)  # Delay for text input
+        logger.info("Text input successful")
+        return {"status": "Input text: " + text, "success": True}
+    except Exception as e:
+        logger.error("Text input failed: " + str(e))
+        return {"status": "Text input failed", "success": False, "error": str(e)}
+
 def navigateTaskerStep(step_description: str) -> Dict[str, Any]:
-    # Example: "Open Tasker and click Add Task"
-    d = getDevice()
-    d.app_start("net.dinglisch.android.taskerm")  # Launch Tasker
-    time.sleep(2)
-    captureScreen()
-    analysis = analyzeImage("current_screen.png", "Find element for: " + step_description + ". Provide box for click.")
-    if "elements" in analysis["analysis"] and analysis["analysis"]["elements"]:
-        elem = analysis["analysis"]["elements"][0]
-        performClick(elem["click_x"], elem["click_y"])
-        return {"status": "Step executed"}
-    return {"error": "Element not found"}
+    """Navigate through Tasker UI by finding and clicking elements based on description.
+    
+    This high-level tool combines screen capture, analysis, and clicking to navigate Tasker.
+    It launches Tasker if needed and attempts to find and click the described UI element.
+    
+    Args:
+        step_description: Description of what to find and click (e.g., "Add Task button")
+    
+    Returns:
+        dict: Contains execution status and any errors.
+    """
+    try:
+        logger.info("Navigating Tasker step: " + step_description)
+        d = getDevice()
+        
+        # Launch Tasker if not already open
+        d.app_start("net.dinglisch.android.taskerm")
+        time.sleep(2)
+        
+        # Capture and analyze screen
+        capture_result = captureScreen()
+        if not capture_result.get("success"):
+            return {"status": "failed", "error": "Screen capture failed"}
+        
+        analysis_result = analyzeImage(
+            capture_result["image_path"], 
+            "Find element for: " + step_description + ". Provide box for click."
+        )
+        
+        if not analysis_result.get("success"):
+            return {"status": "failed", "error": "Image analysis failed"}
+        
+        # Click on the first matching element
+        elements = analysis_result.get("analysis", {}).get("elements", [])
+        if elements:
+            elem = elements[0]
+            if "click_x" in elem and "click_y" in elem:
+                click_result = performClick(elem["click_x"], elem["click_y"])
+                if click_result.get("success"):
+                    return {"status": "Step executed successfully", "success": True}
+                else:
+                    return {"status": "Click failed", "success": False, "error": click_result.get("error")}
+        
+        return {"status": "Element not found", "success": False, "error": "No matching elements found"}
+    except Exception as e:
+        logger.error("Navigation step failed: " + str(e))
+        return {"status": "failed", "success": False, "error": str(e)}
 
-# Generate Plan
 def generatePlan(description: str) -> Dict[str, Any]:
-    model = GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content("Plan steps to create Tasker task: " + description + ". Output as JSON list of steps.")
+    """Generate a structured plan for creating a Tasker task based on user description.
+    
+    This tool uses Gemini to create a step-by-step plan for automating a task in Tasker.
+    The plan includes specific UI actions needed to create the automation.
+    
+    Args:
+        description: Natural language description of the desired Tasker automation
+    
+    Returns:
+        dict: Contains the generated plan as a list of steps.
+    """
     try:
-        plan = json.loads(response.text)
-        return {"plan": plan}
-    except json.JSONDecodeError:
-        # If JSON parsing fails, return the raw text
-        return {"plan": response.text, "raw_response": True}
+        logger.info("Generating plan for: " + description)
+        model = GenerativeModel("gemini-2.0-flash")
+        
+        prompt = """Create a detailed step-by-step plan to implement this Tasker automation: """ + description + """
+        
+        Output as a JSON list with the following structure:
+        {
+            "steps": [
+                {
+                    "step_number": 1,
+                    "action": "Open Tasker app",
+                    "ui_element": "Tasker app icon",
+                    "description": "Launch the Tasker application"
+                },
+                ...
+            ]
+        }
+        
+        Include specific UI elements to click and any text to input."""
+        
+        response = model.generate_content(prompt)
+        
+        try:
+            plan = json.loads(response.text)
+            logger.info("Plan generated with " + str(len(plan.get("steps", []))) + " steps")
+            return {"plan": plan, "success": True}
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return the raw text
+            logger.warning("Failed to parse plan as JSON, returning raw text")
+            return {"plan": response.text, "raw_response": True, "success": True}
+    except Exception as e:
+        logger.error("Plan generation failed: " + str(e))
+        return {"success": False, "error": str(e)}
 
-# Test Task
 def testTask(task_name: str) -> Dict[str, Any]:
-    d = getDevice()
-    # Run via intent
-    cmd = "am broadcast -a net.dinglisch.android.tasker.ACTION_TASK -e task_name '" + task_name + "'"
-    result = d.shell(cmd).output
-    # Verify (example: check log or state)
-    return {"result": result, "passed": "success" in result.lower()}
-
-# Perform Text Input
-def performTextInput(text: str) -> Dict[str, str]:
-    device = AdbDeviceUsb(serial=DEVICE_SERIAL)
-    device.connect()
-    # Escape quotes and special characters for shell
-    escaped_text = text.replace('"', '\\"').replace("'", "\\'")
-    device.shell('input text "' + escaped_text + '"')
-    time.sleep(1)  # Delay for text input
-    return {"status": "Input text: " + text}
-
-# Legacy function names for backward compatibility
-capture_screen = captureScreen
-analyze_image = analyzeImage
-perform_click = performClick
-navigate_tasker_step = navigateTaskerStep
-generate_plan = generatePlan
-test_task = testTask
-get_device = getDevice
-perform_text_input = performTextInput
-
-# Workflow invocation tools for root agent
-def invokeCreationWorkflow(user_query: str) -> Dict[str, Any]:
-    """
-    Invoke the creation workflow for creating new Tasker tasks.
-    This tool triggers the sequential workflow: planner -> vision -> navigator.
+    """Test a Tasker task by executing it via intent and checking the result.
+    
+    This tool runs a Tasker task using Android intents and monitors the result.
+    Use this to verify that created tasks work correctly.
+    
+    Args:
+        task_name: Name of the Tasker task to test
+    
+    Returns:
+        dict: Contains test result and pass/fail status.
     """
     try:
-        # Execute the creation workflow with the user query
-        # Note: This is a simplified invocation - actual ADK workflow execution 
-        # would need proper context and session management
-        workflow_result = {
-            "workflow": "creation_workflow",
-            "query": user_query,
-            "status": "initiated",
-            "message": "Creation workflow started - delegating to planner, vision, and navigator agents"
-        }
+        logger.info("Testing Tasker task: " + task_name)
+        d = getDevice()
         
-        # Trigger first step - generate plan
-        plan_result = generatePlan(user_query)
-        workflow_result["plan"] = str(plan_result)
+        # Run via intent
+        cmd = "am broadcast -a net.dinglisch.android.tasker.ACTION_TASK -e task_name '" + task_name + "'"
+        result = d.shell(cmd).output
         
-        # Trigger vision analysis
-        capture_result = captureScreen()
-        if capture_result["success"]:
-            analysis_result = analyzeImage(capture_result["image_path"], "Analyze current Tasker screen for navigation")
-            workflow_result["vision_analysis"] = str(analysis_result)
+        logger.info("Task execution result: " + result)
         
-        # Mark as completed
-        workflow_result["status"] = "completed"
-        workflow_result["message"] = "Creation workflow executed successfully"
+        # Simple pass/fail check
+        passed = "error" not in result.lower() and "exception" not in result.lower()
         
-        return workflow_result
-        
-    except Exception as e:
         return {
-            "workflow": "creation_workflow",
-            "query": user_query,
-            "status": "error",
-            "error": str(e)
+            "result": result, 
+            "passed": passed,
+            "success": True,
+            "task_name": task_name
         }
-
-def invokeTestingWorkflow(task_name: str) -> Dict[str, Any]:
-    """
-    Invoke the testing workflow for validating Tasker tasks.
-    This tool triggers the loop workflow with the tester agent.
-    """
-    try:
-        # Execute the testing workflow
-        workflow_result = {
-            "workflow": "testing_workflow",
-            "task_name": task_name,
-            "status": "initiated",
-            "message": "Testing workflow started - delegating to tester agent"
-        }
-        
-        # Trigger testing
-        test_result = testTask(task_name)
-        workflow_result["test_result"] = str(test_result)
-        
-        # Mark as completed
-        workflow_result["status"] = "completed"
-        workflow_result["message"] = "Testing workflow executed successfully"
-        
-        return workflow_result
-        
     except Exception as e:
-        return {
-            "workflow": "testing_workflow",
-            "task_name": task_name,
-            "status": "error",
-            "error": str(e)
-        }
+        logger.error("Task testing failed: " + str(e))
+        return {"success": False, "passed": False, "error": str(e)}
 
-def invokeParallelAnalysis(analysis_query: str) -> Dict[str, Any]:
-    """
-    Invoke parallel analysis workflow for complex screen analysis.
-    This tool triggers parallel vision analysis.
-    """
-    try:
-        # Execute parallel analysis
-        workflow_result = {
-            "workflow": "parallel_analysis",
-            "query": analysis_query,
-            "status": "initiated",
-            "message": "Parallel analysis workflow started - using multiple vision agents"
-        }
-        
-        # Trigger screen capture and analysis
-        capture_result = captureScreen()
-        if capture_result["success"]:
-            analysis_result = analyzeImage(capture_result["image_path"], analysis_query)
-            workflow_result["analysis"] = str(analysis_result)
-            
-            # Mark as completed
-            workflow_result["status"] = "completed"
-            workflow_result["message"] = "Parallel analysis workflow executed successfully"
-        
-        return workflow_result
-        
-    except Exception as e:
-        return {
-            "workflow": "parallel_analysis",
-            "query": analysis_query,
-            "status": "error",
-            "error": str(e)
-        }
-
-def detectQueryType(user_query: str) -> Dict[str, Any]:
-    """
-    Detect the type of user query and determine which workflow to use.
-    Returns the appropriate workflow and action to take.
-    """
-    query_lower = user_query.lower()
-    
-    # Creation keywords
-    creation_keywords = ["create", "make", "build", "set up", "configure", "add", "new task", "automation"]
-    
-    # Testing keywords  
-    testing_keywords = ["test", "verify", "check", "validate", "run", "execute", "try"]
-    
-    # Analysis keywords
-    analysis_keywords = ["analyze", "look at", "examine", "screen", "ui", "interface", "what do you see"]
-    
-    detected_type = "unknown"
-    confidence = 0.0
-    
-    # Check for creation intent
-    creation_matches = sum(1 for keyword in creation_keywords if keyword in query_lower)
-    if creation_matches > 0:
-        detected_type = "creation"
-        confidence = min(creation_matches / len(creation_keywords), 1.0)
-    
-    # Check for testing intent
-    testing_matches = sum(1 for keyword in testing_keywords if keyword in query_lower)
-    if testing_matches > 0 and testing_matches > creation_matches:
-        detected_type = "testing"
-        confidence = min(testing_matches / len(testing_keywords), 1.0)
-    
-    # Check for analysis intent
-    analysis_matches = sum(1 for keyword in analysis_keywords if keyword in query_lower)
-    if analysis_matches > 0 and analysis_matches > max(creation_matches, testing_matches):
-        detected_type = "analysis"
-        confidence = min(analysis_matches / len(analysis_keywords), 1.0)
-    
-    # Determine recommended workflow
-    recommended_workflow = None
-    if detected_type == "creation":
-        recommended_workflow = "creation_workflow"
-    elif detected_type == "testing":
-        recommended_workflow = "testing_workflow"
-    elif detected_type == "analysis":
-        recommended_workflow = "parallel_analysis"
-    
-    return {
-        "query": user_query,
-        "detected_type": detected_type,
-        "confidence": confidence,
-        "recommended_workflow": recommended_workflow,
-        "action": "Use invoke" + (recommended_workflow.replace("_", "").title() if recommended_workflow else "CreationWorkflow") + " tool"
-    }
-
-# Add new tools to legacy aliases
-invoke_creation_workflow = invokeCreationWorkflow
-invoke_testing_workflow = invokeTestingWorkflow
-invoke_parallel_analysis = invokeParallelAnalysis
-detect_query_type = detectQueryType 
+# Create FunctionTool instances for ADK
+captureScreenTool = FunctionTool(captureScreen)
+analyzeImageTool = FunctionTool(analyzeImage)
+performClickTool = FunctionTool(performClick)
+performTextInputTool = FunctionTool(performTextInput)
+navigateTaskerStepTool = FunctionTool(navigateTaskerStep)
+generatePlanTool = FunctionTool(generatePlan)
+testTaskTool = FunctionTool(testTask) 
